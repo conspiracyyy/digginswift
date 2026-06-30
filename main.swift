@@ -50,13 +50,80 @@ enum OreType {
     case gold, silver, copper, emerald
 }
 
+// MARK: - Virtual Joystick
+class VirtualJoystick: UIView {
+    let outerCircle = UIView()
+    let innerCircle = UIView()
+    var joystickDelegate: JoystickDelegate?
+    
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        setupUI()
+    }
+    
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setupUI()
+    }
+    
+    func setupUI() {
+        self.backgroundColor = UIColor.clear
+        
+        outerCircle.backgroundColor = UIColor.white.withAlphaComponent(0.3)
+        outerCircle.layer.borderColor = UIColor.white.cgColor
+        outerCircle.layer.borderWidth = 2
+        outerCircle.layer.cornerRadius = 50
+        outerCircle.frame = CGRect(x: 0, y: 0, width: 100, height: 100)
+        addSubview(outerCircle)
+        
+        innerCircle.backgroundColor = UIColor.white.withAlphaComponent(0.6)
+        innerCircle.layer.cornerRadius = 25
+        innerCircle.frame = CGRect(x: 25, y: 25, width: 50, height: 50)
+        addSubview(innerCircle)
+        
+        let gesture = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
+        addGestureRecognizer(gesture)
+    }
+    
+    @objc func handlePan(_ gesture: UIPanGestureRecognizer) {
+        let translation = gesture.translation(in: self)
+        let distance = sqrt(translation.x * translation.x + translation.y * translation.y)
+        let maxDistance: CGFloat = 40
+        
+        let normalizedX = min(translation.x / maxDistance, 1.0)
+        let normalizedY = min(translation.y / maxDistance, 1.0)
+        
+        let clampedX = max(-1.0, min(normalizedX, 1.0))
+        let clampedY = max(-1.0, min(normalizedY, 1.0))
+        
+        let limitedDistance = min(distance, maxDistance)
+        let angle = atan2(translation.y, translation.x)
+        
+        let newX = 50 + cos(angle) * limitedDistance
+        let newY = 50 + sin(angle) * limitedDistance
+        
+        innerCircle.frame = CGRect(x: newX - 25, y: newY - 25, width: 50, height: 50)
+        
+        if gesture.state == .ended || gesture.state == .cancelled {
+            UIView.animate(withDuration: 0.1) {
+                self.innerCircle.frame = CGRect(x: 25, y: 25, width: 50, height: 50)
+            }
+            joystickDelegate?.joystickDidMove(x: 0, y: 0)
+        } else {
+            joystickDelegate?.joystickDidMove(x: Float(clampedX), y: Float(clampedY))
+        }
+    }
+}
+
+protocol JoystickDelegate {
+    func joystickDidMove(x: Float, y: Float)
+}
+
 // MARK: - Player Character
 class PlayerCharacter {
     let node: SCNNode
     var isWalking = false
     var hasSpade = false
-    let idleAnimationDuration = 1.0
-    var currentAnimation: SCNAction?
     
     init() {
         node = SCNNode()
@@ -133,7 +200,6 @@ class PlayerCharacter {
             let leftLeg = node.childNode(withName: "leftLeg", recursively: true)
             let rightLeg = node.childNode(withName: "rightLeg", recursively: true)
             
-            // Goofy walking animation
             let armSwing1 = SCNAction.rotateBy(x: CGFloat.pi / 6, y: 0, z: 0, duration: 0.3)
             let armSwing2 = SCNAction.rotateBy(x: -CGFloat.pi / 3, y: 0, z: 0, duration: 0.3)
             let armSequence = SCNAction.sequence([armSwing1, armSwing2])
@@ -187,7 +253,6 @@ class PlayerCharacter {
         
         let spadeHolder = node.childNode(withName: "spadeHolder", recursively: true)
         
-        // Create spade handle
         let handleGeometry = SCNCylinder(radius: 0.02, height: 0.5)
         handleGeometry.firstMaterial?.diffuse.contents = UIColor(red: 0.4, green: 0.2, blue: 0.0, alpha: 1)
         let handle = SCNNode(geometry: handleGeometry)
@@ -195,7 +260,6 @@ class PlayerCharacter {
         handle.name = "spadeHandle"
         spadeHolder?.addChildNode(handle)
         
-        // Create spade blade
         let bladeGeometry = SCNBox(width: 0.25, height: 0.15, length: 0.05, chamferRadius: 0.01)
         bladeGeometry.firstMaterial?.diffuse.contents = UIColor(red: 0.7, green: 0.7, blue: 0.7, alpha: 1)
         let blade = SCNNode(geometry: bladeGeometry)
@@ -218,23 +282,22 @@ class PlayerCharacter {
 }
 
 // MARK: - Main Game Scene
-class MiningGameViewController: UIViewController, SCNSceneRendererDelegate {
+class MiningGameViewController: UIViewController, SCNSceneRendererDelegate, JoystickDelegate {
     var sceneView: SCNView!
     var scene: SCNScene!
     var cameraNode: SCNNode!
     var player: PlayerCharacter!
     var ores: [Ore] = []
     var oreCountLabel: UILabel!
-    var controlsLabel: UILabel!
     var spadeStatusLabel: UILabel!
     var moveDirection = SCNVector3(0, 0, 0)
-    var keysPressed = Set<String>()
+    var joystick: VirtualJoystick!
+    var jumpButton: UIButton!
     
     override func viewDidLoad() {
         super.viewDidLoad()
         setupScene()
         setupUI()
-        setupGameLoop()
     }
     
     func setupScene() {
@@ -333,10 +396,10 @@ class MiningGameViewController: UIViewController, SCNSceneRendererDelegate {
     
     func setupUI() {
         // Ore counter
-        oreCountLabel = UILabel(frame: CGRect(x: 20, y: 40, width: 300, height: 50))
-        oreCountLabel.text = "Ores Collected: 0"
+        oreCountLabel = UILabel(frame: CGRect(x: 20, y: 40, width: 250, height: 50))
+        oreCountLabel.text = "Ores: 0"
         oreCountLabel.textColor = UIColor.black
-        oreCountLabel.font = UIFont.boldSystemFont(ofSize: 24)
+        oreCountLabel.font = UIFont.boldSystemFont(ofSize: 20)
         oreCountLabel.backgroundColor = UIColor.white.withAlphaComponent(0.8)
         oreCountLabel.layer.cornerRadius = 10
         oreCountLabel.clipsToBounds = true
@@ -344,8 +407,8 @@ class MiningGameViewController: UIViewController, SCNSceneRendererDelegate {
         view.addSubview(oreCountLabel)
         
         // Spade status
-        spadeStatusLabel = UILabel(frame: CGRect(x: 20, y: 100, width: 300, height: 50))
-        spadeStatusLabel.text = "Spade: NOT EQUIPPED"
+        spadeStatusLabel = UILabel(frame: CGRect(x: 20, y: 100, width: 250, height: 50))
+        spadeStatusLabel.text = "Spade: ❌"
         spadeStatusLabel.textColor = UIColor.red
         spadeStatusLabel.font = UIFont.boldSystemFont(ofSize: 18)
         spadeStatusLabel.backgroundColor = UIColor.white.withAlphaComponent(0.8)
@@ -354,27 +417,27 @@ class MiningGameViewController: UIViewController, SCNSceneRendererDelegate {
         spadeStatusLabel.textAlignment = .center
         view.addSubview(spadeStatusLabel)
         
-        // Controls
-        controlsLabel = UILabel(frame: CGRect(x: 20, y: view.bounds.height - 220, width: view.bounds.width - 40, height: 200))
-        controlsLabel.numberOfLines = 0
-        controlsLabel.text = """
-        CONTROLS:
-        W/A/S/D - Move | SPACE - Jump
-        E - Equip/Unequip Spade | Click on Ore - Dig
-        T - Teleport to Top | Drag - Rotate Camera
-        """
-        controlsLabel.textColor = UIColor.black
-        controlsLabel.font = UIFont.systemFont(ofSize: 14)
-        controlsLabel.backgroundColor = UIColor.white.withAlphaComponent(0.8)
-        controlsLabel.layer.cornerRadius = 10
-        controlsLabel.clipsToBounds = true
-        controlsLabel.textAlignment = .left
-        view.addSubview(controlsLabel)
+        // Virtual Joystick - Bottom Left
+        joystick = VirtualJoystick(frame: CGRect(x: 20, y: view.bounds.height - 150, width: 100, height: 100))
+        joystick.joystickDelegate = self
+        joystick.backgroundColor = UIColor.clear
+        view.addSubview(joystick)
+        
+        // Jump Button - Bottom Right
+        jumpButton = UIButton(type: .system)
+        jumpButton.frame = CGRect(x: view.bounds.width - 120, y: view.bounds.height - 150, width: 100, height: 100)
+        jumpButton.setTitle("JUMP", for: .normal)
+        jumpButton.titleLabel?.font = UIFont.boldSystemFont(ofSize: 16)
+        jumpButton.backgroundColor = UIColor(red: 0, green: 0.5, blue: 1, alpha: 0.9)
+        jumpButton.setTitleColor(UIColor.white, for: .normal)
+        jumpButton.layer.cornerRadius = 50
+        jumpButton.addTarget(self, action: #selector(handleJump), for: .touchUpInside)
+        view.addSubview(jumpButton)
         
         // Teleport button
         let teleportButton = UIButton(type: .system)
-        teleportButton.frame = CGRect(x: view.bounds.width - 140, y: 40, width: 120, height: 50)
-        teleportButton.setTitle("↑ TP TO TOP", for: .normal)
+        teleportButton.frame = CGRect(x: view.bounds.width - 120, y: 40, width: 100, height: 50)
+        teleportButton.setTitle("↑ TOP", for: .normal)
         teleportButton.titleLabel?.font = UIFont.boldSystemFont(ofSize: 14)
         teleportButton.backgroundColor = UIColor(red: 0, green: 0.5, blue: 1, alpha: 0.9)
         teleportButton.setTitleColor(UIColor.white, for: .normal)
@@ -384,14 +447,18 @@ class MiningGameViewController: UIViewController, SCNSceneRendererDelegate {
         
         // Equip/Unequip button
         let equipButton = UIButton(type: .system)
-        equipButton.frame = CGRect(x: view.bounds.width - 140, y: 100, width: 120, height: 50)
-        equipButton.setTitle("EQUIP SPADE", for: .normal)
+        equipButton.frame = CGRect(x: view.bounds.width - 120, y: 100, width: 100, height: 50)
+        equipButton.setTitle("EQUIP", for: .normal)
         equipButton.titleLabel?.font = UIFont.boldSystemFont(ofSize: 14)
         equipButton.backgroundColor = UIColor(red: 1, green: 0.5, blue: 0, alpha: 0.9)
         equipButton.setTitleColor(UIColor.white, for: .normal)
         equipButton.layer.cornerRadius = 10
         equipButton.addTarget(self, action: #selector(toggleSpade), for: .touchUpInside)
         view.addSubview(equipButton)
+    }
+    
+    @objc func handleJump() {
+        player.playJumpAnimation()
     }
     
     @objc func teleportToTop() {
@@ -403,11 +470,11 @@ class MiningGameViewController: UIViewController, SCNSceneRendererDelegate {
     @objc func toggleSpade() {
         if player.hasSpade {
             player.unequipSpade()
-            spadeStatusLabel.text = "Spade: NOT EQUIPPED"
+            spadeStatusLabel.text = "Spade: ❌"
             spadeStatusLabel.textColor = UIColor.red
         } else {
             player.equipSpade()
-            spadeStatusLabel.text = "Spade: EQUIPPED"
+            spadeStatusLabel.text = "Spade: ✅"
             spadeStatusLabel.textColor = UIColor.green
         }
     }
@@ -461,9 +528,8 @@ class MiningGameViewController: UIViewController, SCNSceneRendererDelegate {
         ore.node.removeFromParentNode()
         
         MiningGameManager.shared.oreCount += 1
-        oreCountLabel.text = "Ores Collected: \(MiningGameManager.shared.oreCount)"
+        oreCountLabel.text = "Ores: \(MiningGameManager.shared.oreCount)"
         
-        // Regenerate ore at random location
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             let x = Float.random(in: -20...20)
             let y = Float.random(in: -7...0)
@@ -485,29 +551,23 @@ class MiningGameViewController: UIViewController, SCNSceneRendererDelegate {
         cameraNode.look(at: SCNVector3(playerPos.x, playerPos.y + 0.3, playerPos.z), up: SCNVector3(0, 1, 0), localFront: SCNVector3(0, 0, -1))
     }
     
-    func setupGameLoop() {
-        // Empty - using renderer delegate
-    }
-    
     func renderer(_ renderer: SCNSceneRenderer, didSimulatePhysicsAtTime time: TimeInterval) {
         updatePlayerMovement()
         updateCameraPosition()
     }
     
+    func joystickDidMove(x: Float, y: Float) {
+        moveDirection = SCNVector3(x, 0, y)
+    }
+    
     func updatePlayerMovement() {
-        // Simulated keyboard input from keysPressed set
-        var moveVector = SCNVector3(0, 0, 0)
+        let speed: Float = 0.15
         
-        if keysPressed.contains("w") { moveVector.z -= 0.1 }
-        if keysPressed.contains("a") { moveVector.x -= 0.1 }
-        if keysPressed.contains("s") { moveVector.z += 0.1 }
-        if keysPressed.contains("d") { moveVector.x += 0.1 }
-        
-        if moveVector.x != 0 || moveVector.z != 0 {
+        if moveDirection.x != 0 || moveDirection.z != 0 {
             player.node.position = SCNVector3(
-                player.node.position.x + moveVector.x,
+                player.node.position.x + moveDirection.x * speed,
                 player.node.position.y,
-                player.node.position.z + moveVector.z
+                player.node.position.z + moveDirection.z * speed
             )
             if !player.isWalking {
                 player.playWalkAnimation()
@@ -516,48 +576,18 @@ class MiningGameViewController: UIViewController, SCNSceneRendererDelegate {
             player.stopWalkAnimation()
         }
         
-        // Clamp to map bounds
         let mapSize: Float = 25
         player.node.position.x = max(-mapSize, min(mapSize, player.node.position.x))
         player.node.position.z = max(-mapSize, min(mapSize, player.node.position.z))
         
-        // Clamp vertical position
         if player.node.position.y < -6 {
             player.node.position.y = -6
         }
         
         MiningGameManager.shared.playerPosition = player.node.position
     }
-    
-    // Override pressesBegan and pressesEnded for keyboard input
-    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressEvent?) {
-        for press in presses {
-            if let key = press.key {
-                switch key.characters.lowercased() {
-                case "w", "a", "s", "d":
-                    keysPressed.insert(key.characters.lowercased())
-                case " ":
-                    player.playJumpAnimation()
-                case "e":
-                    toggleSpade()
-                case "t":
-                    teleportToTop()
-                default:
-                    break
-                }
-            }
-        }
-    }
-    
-    override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressEvent?) {
-        for press in presses {
-            if let key = press.key {
-                keysPressed.remove(key.characters.lowercased())
-            }
-        }
-    }
 }
 
-// MARK: - Main Entry Point
+// MARK: - Entry Point
 let controller = MiningGameViewController()
 PlaygroundPage.current.liveView = controller
